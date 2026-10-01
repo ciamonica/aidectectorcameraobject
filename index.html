@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tugas Praktik: Object & Item Detection</title>
+
+  <!-- TensorFlow.js & COCO-SSD Model -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+
+  <!-- Firebase v8 SDK -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      background-color: #ffffff;
+      color: #000000;
+      padding: 30px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: bold;
+      margin-bottom: 16px;
+    }
+
+    .status-badge {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: bold;
+      padding: 6px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+
+    .status-badge.online {
+      background-color: #d1fae5;
+      color: #065f46;
+    }
+
+    .status-badge.offline {
+      background-color: #fee2e2;
+      color: #991b1b;
+    }
+
+    .counter-container {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .counter-card {
+      background-color: #f3f4f6;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: bold;
+      border-left: 4px solid #10b981;
+    }
+
+    .counter-card.item-card-style {
+      border-left-color: #2563eb;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: bold;
+      color: white;
+      cursor: pointer;
+    }
+
+    .btn-gray { background-color: #6b7280; }
+    .btn-gray:hover { background-color: #4b5563; }
+
+    .btn-red { background-color: #dc2626; }
+    .btn-red:hover { background-color: #b91c1c; }
+
+    .btn-green { background-color: #16a34a; }
+    .btn-green:hover { background-color: #15803d; }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .main-layout {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      max-width: 640px;
+      border-radius: 12px;
+      overflow: hidden;
+      background-color: #000;
+    }
+
+    video {
+      width: 100%;
+      display: block;
+      border-radius: 12px;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    .item-list-container {
+      flex: 1;
+      min-width: 250px;
+      max-width: 320px;
+      background-color: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 16px;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .item-list-title {
+      font-weight: bold;
+      font-size: 14px;
+      color: #374151;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .item-tag {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #ffffff;
+      border: 1px solid #e5e7eb;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .item-tag.person-tag {
+      border-left: 3px solid #10b981;
+    }
+
+    .item-tag.object-tag {
+      border-left: 3px solid #2563eb;
+    }
+
+    .item-tag .badge-score {
+      background-color: #dbeafe;
+      color: #1e40af;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Tugas Praktik: Object & Item Detection</h1>
+
+  <div id="db-status" class="status-badge offline">FIREBASE OFFLINE</div>
+
+  <div class="counter-container">
+    <div class="counter-card">
+      Orang Terdeteksi: <span id="person-count">0</span>
+    </div>
+    <div class="counter-card item-card-style">
+      Benda/Objek Lain: <span id="object-count">0</span>
+    </div>
+  </div>
+
+  <div class="button-group">
+    <button id="btn-start-cam" class="btn btn-gray">Nyala Kamera</button>
+    <button id="btn-stop-cam" class="btn btn-gray">Mati Kamera</button>
+    <button id="btn-toggle-ai" class="btn btn-red" disabled>Start AI</button>
+  </div>
+
+  <div class="main-layout">
+    <div class="video-container">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="item-list-container">
+      <div class="item-list-title">📋 Rincian Objek Terdeteksi</div>
+      <div id="detected-items-list">
+        <div style="color: #9ca3af; font-size: 13px;">Belum ada benda terdeteksi.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // CONFIG FIREBASE DARI GAMBER ANDA
+    // ==========================================
+    const firebaseConfig = {
+      apiKey: "AIzaSyDBUJ-KkuwXVKFBsQKoeWXe34VFJF7wY-k",
+      authDomain: "expense--tracker-mahasiswa.firebaseapp.com",
+      projectId: "expense--tracker-mahasiswa",
+      storageBucket: "expense--tracker-mahasiswa.firebasestorage.app",
+      messagingSenderId: "788005349215",
+      appId: "1:788005349215:web:2d69c48153bebb24be38ea"
+    };
+
+    let db = null;
+    const dbStatusEl = document.getElementById('db-status');
+
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+      dbStatusEl.textContent = "FIREBASE ONLINE";
+      dbStatusEl.className = "status-badge online";
+      console.log(" Berhasil terhubung ke Firebase Firestore!");
+    } catch (error) {
+      console.error("❌ Gagal terhubung ke Firebase:", error);
+      dbStatusEl.textContent = "FIREBASE OFFLINE";
+      dbStatusEl.className = "status-badge offline";
+    }
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const btnStartCam = document.getElementById('btn-start-cam');
+    const btnStopCam = document.getElementById('btn-stop-cam');
+    const btnToggleAi = document.getElementById('btn-toggle-ai');
+    const personCountEl = document.getElementById('person-count');
+    const objectCountEl = document.getElementById('object-count');
+    const detectedItemsListEl = document.getElementById('detected-items-list');
+
+    let stream = null;
+    let isCameraOn = false;
+    let cocoModel = null;
+    let isAiRunning = false;
+    let lastSavedTime = 0;
+
+    cocoSsd.load().then(model => {
+      cocoModel = model;
+      console.log(" Model AI COCO-SSD berhasil dimuat!");
+      if (isCameraOn) btnToggleAi.disabled = false;
+    }).catch(err => {
+      console.error("❌ Gagal memuat Model AI:", err);
+    });
+
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+        video.srcObject = stream;
+        await new Promise(resolve => video.onloadedmetadata = resolve);
+        isCameraOn = true;
+        if (cocoModel) btnToggleAi.disabled = false;
+      } catch (err) {
+        alert("Akses kamera ditolak atau tidak tersedia.");
+      }
+    }
+
+    function stopCamera() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+      }
+      isCameraOn = false;
+      btnToggleAi.disabled = true;
+      if (isAiRunning) stopAi();
+    }
+
+    btnStartCam.addEventListener('click', startCamera);
+    btnStopCam.addEventListener('click', stopCamera);
+
+    async function detectFrame() {
+      if (!isAiRunning || !isCameraOn) return;
+
+      if (video.videoWidth && video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+
+      const predictions = await cocoModel.detect(video, 30, 0.40);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      let currentPersonCount = 0;
+      let currentObjectCount = 0;
+      const now = Date.now();
+      const detectedItemsList = [];
+
+      predictions.forEach(pred => {
+        const isPerson = pred.class === 'person';
+        if (isPerson) currentPersonCount++;
+        else currentObjectCount++;
+
+        const scorePercent = Math.round(pred.score * 100);
+        detectedItemsList.push({
+          name: pred.class,
+          score: scorePercent,
+          type: isPerson ? 'person' : 'object'
+        });
+
+        const [x, y, width, height] = pred.bbox;
+        const boxColor = isPerson ? '#10b981' : '#2563eb';
+
+        ctx.strokeStyle = boxColor;
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, width, height);
+
+        const labelText = `${pred.class} ${scorePercent}%`;
+        ctx.font = '13px Arial';
+        const textWidth = ctx.measureText(labelText).width;
+
+        ctx.fillStyle = boxColor;
+        ctx.fillRect(x, y > 22 ? y - 22 : y, textWidth + 10, 22);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(labelText, x + 5, y > 22 ? y - 6 : y + 15);
+      });
+
+      personCountEl.textContent = currentPersonCount;
+      objectCountEl.textContent = currentObjectCount;
+      renderDetectedItemsUI(detectedItemsList);
+
+      // Simpan log ke koleksi 'detections' di Firestore
+      if (db && predictions.length > 0 && (now - lastSavedTime > 3000)) {
+        db.collection("detections").add({
+          personCount: currentPersonCount,
+          objectCount: currentObjectCount,
+          totalCount: predictions.length,
+          items: detectedItemsList,
+          timestamp: new Date().toISOString()
+        }).then(() => {
+          console.log(` Data berhasil dikirim ke Firebase Firestore!`);
+        }).catch(err => {
+          console.error("❌ Gagal menyimpan ke Firestore:", err);
+        });
+
+        lastSavedTime = now;
+      }
+
+      requestAnimationFrame(detectFrame);
+    }
+
+    function renderDetectedItemsUI(items) {
+      if (items.length === 0) {
+        detectedItemsListEl.innerHTML = '<div style="color: #9ca3af; font-size: 13px;">Belum ada benda terdeteksi.</div>';
+        return;
+      }
+
+      detectedItemsListEl.innerHTML = '';
+      items.forEach(item => {
+        const div = document.createElement('div');
+        div.className = `item-tag ${item.type === 'person' ? 'person-tag' : 'object-tag'}`;
+        div.innerHTML = `
+          <span>${item.name.toUpperCase()}</span>
+          <span class="badge-score">${item.score}%</span>
+        `;
+        detectedItemsListEl.appendChild(div);
+      });
+    }
+
+    function startAi() {
+      isAiRunning = true;
+      btnToggleAi.textContent = 'Stop AI';
+      btnToggleAi.className = 'btn btn-red';
+      detectFrame();
+    }
+
+    function stopAi() {
+      isAiRunning = false;
+      btnToggleAi.textContent = 'Start AI';
+      btnToggleAi.className = 'btn btn-green';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      personCountEl.textContent = '0';
+      objectCountEl.textContent = '0';
+      detectedItemsListEl.innerHTML = '<div style="color: #9ca3af; font-size: 13px;">Belum ada benda terdeteksi.</div>';
+    }
+
+    btnToggleAi.addEventListener('click', () => {
+      if (isAiRunning) stopAi();
+      else startAi();
+    });
+  </script>
+</body>
+</html>
